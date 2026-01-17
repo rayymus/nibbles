@@ -5,14 +5,18 @@ import platform
 import re
 import time
 import math
+import random
 import subprocess
 from pathlib import Path
 from typing import Optional, Sequence, Tuple, Union
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from slack_detection import get_active_window_info
+from poke_for_fun.hamster_dabrain import enter_state
+from poke_for_fun.hamster_states import HamsterState
+from slack_detection import get_active_window_info, set_sleeping
 from CONFIG import *
+from utils import play_audio
 
 
 SizeLike = Union[QtCore.QSize, Tuple[int, int]]
@@ -79,10 +83,16 @@ def bite( #  Should only be run if active window is slacking window
         return None
 
     print("bite: trying bite overlay")
+    """to add: change sprite to bite"""
+    hamster_widget.flip_direction()
+    hamster_widget.rotate(20)
+    play_audio("sound_effects/bite.mp3")
     overlay = BiteOverlay()
     overlay.update_target_window(window)
     overlay.show()
     overlay.raise_()
+    _position_hamster_centered_rect(hamster_widget, _bite_rect_for_window(window))
+    hamster_widget.raise_()
     print("bite: overlay")
 
     timer = QtCore.QTimer(overlay)
@@ -92,17 +102,13 @@ def bite( #  Should only be run if active window is slacking window
         active_app, active_title = get_active_window_info()
         if not _is_slacking_window(active_app, active_title, SLACKING_TITLE_KEYWORDS):
             timer.stop()
+            hamster_widget.move_to_bottom_right()
+            hamster_widget.flip_direction()
             overlay.close()
             overlay.deleteLater()
             setattr(hamster_widget, "_bite_session", None)
             return
         updated = _find_window_by_id(window.window_id)
-        if updated is None or not _is_slacking_window(updated.app_name, updated.title, SLACKING_TITLE_KEYWORDS):
-            timer.stop()
-            overlay.close()
-            overlay.deleteLater()
-            setattr(hamster_widget, "_bite_session", None)
-            return
         overlay.update_target_window(updated)
 
     timer.timeout.connect(tick)
@@ -210,6 +216,47 @@ def make_window_smaller( #  Can only be used if active window is slacking.
     timer.start()
     return timer
 
+def slap_cursor(
+    hamster_widget: QtWidgets.QWidget,
+    moves: int = 6,
+    interval_ms: int = 45,
+    distance_px: int = 220,
+) -> QtCore.QTimer:
+    """Jolt the mouse cursor around to 'slap' it away from where it currently is."""
+    timer = QtCore.QTimer(hamster_widget)
+    timer.setInterval(max(1, int(interval_ms)))
+    remaining = max(1, int(moves))
+
+    def clamp_to_screen(point: QtCore.QPoint, screen: Optional[QtGui.QScreen]) -> QtCore.QPoint:
+        if screen is None:
+            return point
+        geo = screen.availableGeometry()
+        x = max(geo.left(), min(geo.right() - 1, point.x()))
+        y = max(geo.top(), min(geo.bottom() - 1, point.y()))
+        return QtCore.QPoint(x, y)
+
+    def tick() -> None:
+        nonlocal remaining
+        if remaining <= 0:
+            timer.stop()
+            return
+        remaining -= 1
+        cursor_pos = QtGui.QCursor.pos()
+        angle = random.random() * math.tau
+        offset = QtCore.QPoint(
+            int(distance_px * math.cos(angle)),
+            int(distance_px * math.sin(angle)),
+        )
+        target = cursor_pos + offset
+        screen = QtGui.QGuiApplication.screenAt(cursor_pos) or QtGui.QGuiApplication.primaryScreen()
+        QtGui.QCursor.setPos(clamp_to_screen(target, screen))
+
+    timer.timeout.connect(tick)
+    play_audio("sound_effects/slap.mp3")
+    """"to add: move nibbles to mouse pos and change sprite to hold mouse"""
+    tick()  # fire once immediately
+    timer.start()
+    return timer
 
 def _to_size(value: SizeLike) -> QtCore.QSize:
     if isinstance(value, QtCore.QSize):
@@ -231,6 +278,22 @@ def drag(
     timer.start()
     return timer
 
+def wake_up(hamster_widget: QtWidgets.QWidget) -> None:
+    """Stop the sleep animation and return the hamster to idle."""
+    label = getattr(hamster_widget, "_sleep_label", None)
+    if label is not None:
+        movie = label.movie()
+        if movie is not None:
+            movie.stop()
+        label.hide()
+    if hasattr(hamster_widget, "sleeping"):
+        hamster_widget.sleeping = False
+    set_sleeping(False)
+    ham = getattr(hamster_widget, "ham", None)
+    if ham is not None:
+        enter_state(ham, HamsterState.IDLE)
+    hamster_widget.update()
+    
 def sleep(
     hamster_widget: QtWidgets.QWidget,
     gif_path: Optional[str] = None,
@@ -253,6 +316,7 @@ def sleep(
 
     if hasattr(hamster_widget, "sleeping"):
         hamster_widget.sleeping = True
+    set_sleeping(True)
     return movie
 
 
@@ -269,6 +333,20 @@ def _position_hamster_bottom_right_rect(
     hamster_size = hamster_widget.frameGeometry().size()
     x = rect.right() - hamster_size.width() + 1
     y = rect.bottom() - hamster_size.height() + 1
+    pos = QtCore.QPoint(x, y)
+    clamp = getattr(hamster_widget, "_clamp_to_screen", None)
+    if callable(clamp):
+        pos = clamp(pos)
+    hamster_widget.move(pos)
+
+
+def _position_hamster_centered_rect(
+    hamster_widget: QtWidgets.QWidget,
+    rect: QtCore.QRect,
+) -> None:
+    hamster_size = hamster_widget.frameGeometry().size()
+    x = rect.center().x() - hamster_size.width() // 2
+    y = rect.center().y() - hamster_size.height() // 2
     pos = QtCore.QPoint(x, y)
     clamp = getattr(hamster_widget, "_clamp_to_screen", None)
     if callable(clamp):
@@ -334,8 +412,8 @@ def _build_bite_path(rect: QtCore.QRect) -> QtGui.QPainterPath:
     )
     path.addEllipse(base_rect)
 
-    ring_count = 18
-    ring_radius = base * 0.08
+    ring_count = 24
+    ring_radius = base * 0.20
     a = base_rect.width() * 0.5
     b = base_rect.height() * 0.5
     for i in range(ring_count):

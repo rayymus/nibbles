@@ -1,8 +1,8 @@
 import random
 import time
 
-from PokeForFun.hamster_states import HamsterState, ReactionType
-from PokeForFun.hamster_model import HamsterModel
+from poke_for_fun.hamster_states import HamsterState, ReactionType
+from poke_for_fun.hamster_model import HamsterModel
 
 # global constants, needa experiment and change later
 COMBO_TIMEOUT_S = 0.50      # how long to wait for a second poke. If after 0.5s dun hv a 2nd poke, then it's a single poke

@@ -1,6 +1,6 @@
 import sys
 from PyQt5.QtWidgets import QApplication
-from PokeForFun.hamster_action import HamsterWidget
+from poke_for_fun._hamster_action import HamsterWidget
 
 def main():
     app = QApplication(sys.argv)

@@ -8,9 +8,9 @@ from PyQt5.QtCore import Qt, QTimer, QPointF, QRectF
 from PyQt5.QtGui import QPainter, QFont, QPixmap
 from PyQt5.QtWidgets import QWidget
 
-from PokeForFun.hamster_states import HamsterState, ReactionType
-from PokeForFun.hamster_model import HamsterModel
-from PokeForFun.hamster_dabrain import on_poke, update
+from poke_for_fun.hamster_states import HamsterState, ReactionType
+from poke_for_fun.hamster_model import HamsterModel
+from poke_for_fun.hamster_dabrain import on_poke, update
 
 class HamsterWidget(QWidget):
     """

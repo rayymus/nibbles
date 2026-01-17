@@ -7,24 +7,25 @@ from slack_detection.detection import (
     detect_active_slacking_window,
 )
 from slack_detection.__init__ import set_sleep_state_getter, is_sleeping
-from annoyed_actions import bite, make_window_smaller, sleep
+from annoyed_actions import bite, make_window_smaller, sleep, slap_cursor, wake_up
 from CONFIG import *
 
 import os
 import sys
 import time
+import random
 from pathlib import Path
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 
-POKE_DIR = Path(__file__).parent / "PokeForFun"
+POKE_DIR = Path(__file__).parent / "poke_for_fun"
 if str(POKE_DIR) not in sys.path:
     sys.path.insert(0, str(POKE_DIR))
 
-from PokeForFun.hamster_states import HamsterState, ReactionType
-from PokeForFun.hamster_model import HamsterModel
-from PokeForFun.hamster_dabrain import on_poke, update
+from poke_for_fun.hamster_states import HamsterState, ReactionType
+from poke_for_fun.hamster_model import HamsterModel
+from poke_for_fun.hamster_dabrain import on_poke, update
 
 
 class Nibbles(QtWidgets.QWidget):
@@ -75,6 +76,9 @@ class Nibbles(QtWidgets.QWidget):
         self.max_scale = 2.5
         self.scroll_sensitivity = 0.08
 
+        self._rotation_deg = 0
+        self._flip_x = False
+
         # --- animation loop ---
         self.last_frame_time = time.time()
         self.anim_timer = QtCore.QTimer(self)
@@ -94,6 +98,8 @@ class Nibbles(QtWidgets.QWidget):
         self.slack_check_timer.setInterval(20)
         self.slack_check_timer.timeout.connect(self.check_slacking)
         self.slack_check_timer.start()
+        self.last_slap_time = 0.0
+        self.slap_cooldown_s = 3.0
         self._debug_last_update = 0.0
         self._debug_interval_s = 0.2
 
@@ -118,19 +124,32 @@ class Nibbles(QtWidgets.QWidget):
             self.slack_state,
             threshold_seconds=SLACKING_THRESHOLD,
         )
-
         if scrolling or idle or window_slack:
             # trigger hamster annoyance here
             # randomise action
             if scrolling:
                 print("Scrolling")
-                make_window_smaller(self)
-
+                self._slap_cursor_if_ready()
+                # match random.choice(["make_window_smaller", "bite", "slap_cursor"]):
+                #     case "make_window_smaller":
+                #         make_window_smaller(self)
+                #     case "bite":
+                #         bite(self)
+                #     case "slap_cursor":
+                #         self._slap_cursor_if_ready()
+                
             elif idle: 
                 print("Idle")
-                bite(self)
+                if detect_active_slacking_window(
+                    self.slack_state,
+                    threshold_seconds=0
+                ):
+                    bite(self)
+                else:
+                    ...
             else:
                 print("window slack")
+                make_window_smaller(self)
 
     def _load_assets(self) -> None:
         def load(name: str) -> QtGui.QPixmap:
@@ -140,6 +159,7 @@ class Nibbles(QtWidgets.QWidget):
             return pixmap
 
         self.pm_idle = load("idle.png")
+        self.pm_drag = load("drag.png")
         self.pm_angry = load("walk_1.png")
         self.pm_suspicious = load("walk_2.png")
         self.pm_pancake = load("pancake.png")
@@ -156,6 +176,8 @@ class Nibbles(QtWidgets.QWidget):
         return self.pm_idle
 
     def _current_pixmap_and_squash(self) -> tuple[QtGui.QPixmap, float, float]:
+        if self.dragging:
+            return self.pm_drag, 1.0, 1.0
         if self.ham.state == HamsterState.PANCAKE:
             t = self.ham.pancake_t
             if t < 0.999:
@@ -220,8 +242,6 @@ class Nibbles(QtWidgets.QWidget):
         self.long_press_timer.stop()
         self.drag_offset = event.globalPos() - self.frameGeometry().topLeft()
         if self._hit_test(event.pos()):
-            on_poke(self.ham)
-            self.poke_on_press = True
             self.long_press_timer.start(self.long_press_duration_ms)
         else:
             self.long_press_timer.stop()
@@ -276,6 +296,13 @@ class Nibbles(QtWidgets.QWidget):
         y = max(geo.top(), min(max_y, pos.y()))
         return QtCore.QPoint(x, y)
 
+    def _slap_cursor_if_ready(self) -> None:
+        now = time.time()
+        if now - self.last_slap_time < self.slap_cooldown_s:
+            return
+        slap_cursor(self)
+        self.last_slap_time = now
+
     def _trigger_long_press(self) -> None:
         if (
             not self.dragging
@@ -287,7 +314,10 @@ class Nibbles(QtWidgets.QWidget):
         if not self._hit_test(self.press_pos):
             return
         self.long_press_triggered = True
-        sleep(self)
+        if self.sleeping:
+            wake_up(self)
+        else:
+            sleep(self)
         
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:
         painter = QtGui.QPainter(self)
@@ -305,24 +335,36 @@ class Nibbles(QtWidgets.QWidget):
             draw_w,
             draw_h,
         )
-        painter.drawPixmap(target, pm, QtCore.QRectF(pm.rect()))
+        if self._rotation_deg % 360 or self._flip_x:
+            painter.save()
+            center = target.center()
+            painter.translate(center)
+            if self._rotation_deg % 360:
+                painter.rotate(self._rotation_deg)
+            if self._flip_x:
+                painter.scale(-1, 1)
+            painter.translate(-center)
+            painter.drawPixmap(target, pm, QtCore.QRectF(pm.rect()))
+            painter.restore()
+        else:
+            painter.drawPixmap(target, pm, QtCore.QRectF(pm.rect()))
 
-        if self.ham.bubble_text:
-            painter.setFont(QtGui.QFont("Arial", 11))
-            bubble_w = 280
-            bubble_h = 50
-            bubble = QtCore.QRectF(
-                target.left(),
-                target.top() - bubble_h - 10,
-                bubble_w,
-                bubble_h,
-            )
-            painter.drawRoundedRect(bubble, 12, 12)
-            painter.drawText(
-                bubble.adjusted(10, 6, -10, -6),
-                QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
-                self.ham.bubble_text,
-            )
+        # if self.ham.bubble_text:
+        #     painter.setFont(QtGui.QFont("Arial", 11))
+        #     bubble_w = 280
+        #     bubble_h = 50
+        #     bubble = QtCore.QRectF(
+        #         target.left(),
+        #         target.top() - bubble_h - 10,
+        #         bubble_w,
+        #         bubble_h,
+        #     )
+        #     painter.drawRoundedRect(bubble, 12, 12)
+        #     painter.drawText(
+        #         bubble.adjusted(10, 6, -10, -6),
+        #         QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
+        #         self.ham.bubble_text,
+        #     )
 
     def move_to_bottom_right(self) -> None:
         # Use the screen under the mouse, fallback to primary
@@ -336,6 +378,14 @@ class Nibbles(QtWidgets.QWidget):
         x = geo.right() - self.width() + 1
         y = geo.bottom() - self.height() + 1
         self.move(x, y)
+
+    def rotate(self, degree: float) -> None:
+        self._rotation_deg = (self._rotation_deg + degree) % 360
+        self.update()
+
+    def flip_direction(self) -> None:
+        self._flip_x = not self._flip_x
+        self.update()
 
 
 def main() -> int:
