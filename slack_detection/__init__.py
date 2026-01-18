@@ -67,7 +67,7 @@ def _is_periodic(
     max_period_s: float,
     max_jitter_ratio: float,
 ) -> bool:
-    print(timestamps)
+    # print(timestamps)
     if len(timestamps) < min_events:
         return False
     recent = list(timestamps)[-min_events:]

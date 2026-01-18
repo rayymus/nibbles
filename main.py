@@ -46,12 +46,14 @@ class Nibbles(QtWidgets.QWidget):
         self.setMouseTracking(True)
 
         #  Debug text
-        self.debug_label = QtWidgets.QLabel(self)
-        self.debug_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
-        self.debug_label.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
-        self.debug_label.setStyleSheet("QLabel { color: white; font-size: 10pt; }")
-        self.debug_label.move(6, 6)
-        self.debug_label.resize(self.size())
+        self.debug_mode = False
+        if self.debug_mode:
+            self.debug_label = QtWidgets.QLabel(self)
+            self.debug_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
+            self.debug_label.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+            self.debug_label.setStyleSheet("QLabel { color: white; font-size: 10pt; }")
+            self.debug_label.move(6, 6)
+            self.debug_label.resize(self.size())
 
         # --- hamster model + assets ---
         self.ham = HamsterModel()
@@ -136,8 +138,7 @@ class Nibbles(QtWidgets.QWidget):
 
             if scrolling: #  Active slacking
                 print("Scrolling")
-                self._slap_cursor_if_ready()
-                # possible_actions = ["make_window_smaller", "bite", "slap_cursor", "splat"]
+                possible_actions = ["make_window_smaller", "bite", "slap_cursor", "splat"]
                 
             elif idle: 
                 print("Idle")
@@ -147,7 +148,7 @@ class Nibbles(QtWidgets.QWidget):
                 ):
                     possible_actions = ["make_window_smaller", "bite", "splat"]
                 else:
-                    splat(self)
+                    possible_actions = ["splat"]
             else: #  Active slacking
                 print("window slack")
                 possible_actions = ["make_window_smaller", "bite", "splat"]
@@ -229,7 +230,7 @@ class Nibbles(QtWidgets.QWidget):
         clamped = self._clamp_to_screen(self.pos())
         if clamped != self.pos():
             self.move(clamped)
-        if now - self._debug_last_update >= self._debug_interval_s:
+        if self.debug_mode and now - self._debug_last_update >= self._debug_interval_s:
             self._debug_last_update = now
             self.debug_label.setText(
                 "Input: clicks={clicks} scrolls={scrolls} keys={keys} "
@@ -246,7 +247,8 @@ class Nibbles(QtWidgets.QWidget):
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         super().resizeEvent(event)
-        self.debug_label.resize(self.size())
+        if self.debug_mode:
+            self.debug_label.resize(self.size())
         self._center_hamster()
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
