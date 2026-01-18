@@ -12,6 +12,8 @@ from typing import Optional, Sequence, Tuple, Union
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from CONFIG import *
+from hamster_states import HamsterState
+from hamster_dabrain import enter_state
 from slack_detection import get_active_window_info
 from utils import play_audio, _parse_xprop_value, _run_command, _macos_accessibility_trusted
 
@@ -50,12 +52,18 @@ class BiteOverlay(QtWidgets.QWidget):
             QtCore.Qt.FramelessWindowHint
             | QtCore.Qt.WindowStaysOnTopHint
             | QtCore.Qt.Window
+            | QtCore.Qt.WindowDoesNotAcceptFocus
         )
+        if hasattr(QtCore.Qt, "WindowTransparentForInput"):
+            flags |= QtCore.Qt.WindowTransparentForInput
         super().__init__(None, flags)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
         self.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
         self.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)
+        if hasattr(QtCore.Qt, "WA_X11DoNotAcceptFocus"):
+            self.setAttribute(QtCore.Qt.WA_X11DoNotAcceptFocus, True)
         self.setWindowFlag(QtCore.Qt.WindowDoesNotAcceptFocus, True)
+        self.setFocusPolicy(QtCore.Qt.NoFocus)
         self._bite_rect = QtCore.QRect()
         self._bite_color = QtGui.QColor(0, 0, 0, 255)
 
@@ -80,12 +88,30 @@ class _SplatResetFilter(QtCore.QObject):
     def __init__(self, hamster_widget: QtWidgets.QWidget) -> None:
         super().__init__(hamster_widget)
         self._hamster_widget = hamster_widget
+        app = QtWidgets.QApplication.instance()
+        interval_ms = 400
+        if app is not None:
+            try:
+                interval_ms = app.styleHints().mouseDoubleClickInterval()
+            except Exception:
+                pass
+        self._double_click_interval_s = max(0.05, interval_ms / 1000.0)
+        drag_distance = 6
+        start_drag_distance = getattr(QtWidgets.QApplication, "startDragDistance", None)
+        if callable(start_drag_distance):
+            try:
+                drag_distance = int(start_drag_distance())
+            except Exception:
+                pass
+        self._double_click_distance = max(2, drag_distance)
+        self._last_click_time = 0.0
+        self._last_click_pos: Optional[QtCore.QPoint] = None
 
     def eventFilter(self, _obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
         if event.type() == QtCore.QEvent.MouseButtonDblClick:
             if isinstance(event, QtGui.QMouseEvent) and event.button() != QtCore.Qt.LeftButton:
                 return False
-            _reset_splat(self._hamster_widget)
+            reset_splat(self._hamster_widget)
             return True
         return False
 
@@ -104,14 +130,13 @@ def bite( #  Should only be run if active window is slacking window
         return None
 
     print("bite: trying bite overlay")
-    """to add: change sprite to bite"""
+    _set_ham_state(hamster_widget, HamsterState.BITE)
     hamster_widget.flip_direction()
     hamster_widget.rotate(20)
     play_audio("sound_effects/bite.mp3")
     overlay = BiteOverlay()
     overlay.update_target_window(window)
     overlay.show()
-    overlay.raise_()
     _position_hamster_centered_rect(hamster_widget, _bite_rect_for_window(window))
     hamster_widget.raise_()
     print("bite: overlay")
@@ -121,15 +146,23 @@ def bite( #  Should only be run if active window is slacking window
 
     def tick() -> None:
         active_app, active_title = get_active_window_info()
-        if not _is_slacking_window(active_app, active_title, SLACKING_TITLE_KEYWORDS):
+        active_title_norm = (active_title or "").casefold()
+        active_is_hamster = active_title_norm == "nibbles"
+        if (active_app or active_title) and not active_is_hamster and not _is_slacking_window(
+            active_app, active_title, SLACKING_TITLE_KEYWORDS
+        ):
             timer.stop()
             hamster_widget.move_to_bottom_right()
+            hamster_widget.rotate(-20)
             hamster_widget.flip_direction()
+            _set_ham_state(hamster_widget, HamsterState.IDLE)
             overlay.close()
             overlay.deleteLater()
             setattr(hamster_widget, "_bite_session", None)
             return
         updated = _find_window_by_id(window.window_id)
+        if updated is None:
+            return
         overlay.update_target_window(updated)
 
     timer.timeout.connect(tick)
@@ -248,6 +281,7 @@ def splat(hamster_widget: QtWidgets.QWidget) -> Optional[SplatState]:
     if ham is None or not hasattr(ham, "user_scale"):
         print("splat: hamster widget missing model")
         return None
+    _set_ham_state(hamster_widget, HamsterState.SPLAT)
 
     get_pm = getattr(hamster_widget, "_current_pixmap_and_squash", None)
     if callable(get_pm):
@@ -322,8 +356,21 @@ def _reset_splat(hamster_widget: QtWidgets.QWidget) -> None:
     if ham is not None:
         ham.user_scale = state.prev_scale
         ham.x, ham.y = state.prev_ham_pos
+        enter_state(ham, HamsterState.IDLE)
 
     setattr(hamster_widget, "_splat_state", None)
+    hamster_widget.update()
+
+
+def reset_splat(hamster_widget: QtWidgets.QWidget) -> None:
+    _reset_splat(hamster_widget)
+
+
+def _set_ham_state(hamster_widget: QtWidgets.QWidget, state: HamsterState) -> None:
+    ham = getattr(hamster_widget, "ham", None)
+    if ham is None:
+        return
+    enter_state(ham, state)
     hamster_widget.update()
 
 def slap_cursor(

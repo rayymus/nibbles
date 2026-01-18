@@ -36,10 +36,17 @@ def record_mouse_click(state: SlackDetectionState, timestamp: Optional[float] = 
     state.click_timestamps.append(now)
 
 
-def record_mouse_scroll(state: SlackDetectionState, timestamp: Optional[float] = None) -> None:
+def record_mouse_scroll(
+    state: SlackDetectionState,
+    timestamp: Optional[float] = None,
+    debounce_s: float = 0.25,
+) -> None:
     now = time.time() if timestamp is None else timestamp
     state.last_input_time = now
-    state.scroll_timestamps.append(now)
+    last_event = getattr(state, "last_scroll_event_time", 0.0)
+    if (now - last_event) >= debounce_s:
+        state.scroll_timestamps.append(now)
+    state.last_scroll_event_time = now
 
 
 def record_keypress(state: SlackDetectionState, timestamp: Optional[float] = None) -> None:
@@ -51,4 +58,3 @@ def record_keypress(state: SlackDetectionState, timestamp: Optional[float] = Non
 def record_mouse_move(state: SlackDetectionState, timestamp: Optional[float] = None) -> None:
     now = time.time() if timestamp is None else timestamp
     state.last_input_time = now
-

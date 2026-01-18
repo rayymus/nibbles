@@ -4,7 +4,7 @@ class HamsterState(Enum): # depends on the number of pokes
     IDLE = auto() # normal state
     SINGLE_REACT = auto() # if poke once
     PANCAKE = auto() # else :>
-
+    SLEEP = auto() # long press
 
 class ReactionType(Enum): # this one for poke once
     ANGRY = auto()

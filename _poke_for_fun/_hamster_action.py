@@ -76,7 +76,7 @@ class HamsterWidget(QWidget):
         self.pm_idle = load("idle.png")
         self.pm_angry = load("walk_1.png")
         self.pm_suspicious = load("walk_2.png")
-        self.pm_pancake = load("pancake.jpg")
+        self.pm_pancake = load("pancake.png")
 
         # the sleepy part
         self.sleep_movie = QMovie(str(self.assets_dir / "sleepy.gif"))

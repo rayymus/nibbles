@@ -39,9 +39,26 @@ def enter_state(ham: HamsterModel, new_state: HamsterState, now: float | None = 
         ham.bubble_until = 0.0
         ham.pancake_t = 0.0
 
+    elif new_state == HamsterState.SLEEP:
+        ham.reaction = None
+        #ham.bubble_text = ""
+        ham.bubble_until = 0.0
+        ham.pancake_t = 0.0
+        ham.poke_count = 0
+
+    elif new_state in (HamsterState.BITE, HamsterState.SPLAT):
+        ham.reaction = None
+        ham.bubble_until = 0.0
+        ham.pancake_t = 0.0
+        ham.poke_count = 0
+
 
 def on_poke(ham: HamsterModel, now: float | None = None) -> None:
     """Call this when the user pokes. This one mainly handles multi poke. Single poke is handled by update()."""
+
+    # if he's sleeping then cannot poke him :> needa wake him up first
+    if ham.state == HamsterState.SLEEP:
+        return
 
     if now is None:
         now = time.time()
@@ -62,6 +79,16 @@ def on_poke(ham: HamsterModel, now: float | None = None) -> None:
     if ham.poke_count >= 2:
         enter_state(ham, HamsterState.PANCAKE, now = now) # STATE TRANSITION 
         return
+
+def on_long_press(ham, now=None):
+    if now is None:
+        now = time.time()
+
+    # If sleeping then wake up, else, sleep
+    if ham.state == HamsterState.SLEEP:
+        enter_state(ham, HamsterState.IDLE, now = now)
+    else:
+        enter_state(ham, HamsterState.SLEEP, now = now)
 
 
 # randomize between the two possible reaction faces :>

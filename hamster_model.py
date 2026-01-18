@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional
-from poke_for_fun.hamster_states import HamsterState, ReactionType
+from hamster_states import HamsterState, ReactionType
 
 class HamsterModel:
     # initial pos + sz

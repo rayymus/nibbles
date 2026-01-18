@@ -11,24 +11,46 @@ from CONFIG import *
 
 
 _audio_players: dict[str, QMediaPlayer] = {}
+_sound_effects_dir = Path(__file__).resolve().parent / "sound_effects"
 
 
-def play_audio(path: str, volume: int = 80) -> None:
-    global _audio_players
+def _resolve_audio_path(path: str | Path) -> Path:
     audio_path = Path(path)
     if not audio_path.is_absolute():
         audio_path = Path(__file__).resolve().parent / audio_path
-    key = str(audio_path)
+    return audio_path
+
+
+def _get_or_create_player(path: Path, volume: int) -> QMediaPlayer:
+    key = str(path)
     player = _audio_players.get(key)
     if player is None:
         player = QMediaPlayer()
-        player.setVolume(volume)
         url = QtCore.QUrl.fromLocalFile(key)
         player.setMedia(QMediaContent(url))
         _audio_players[key] = player
-    else:
-        player.stop()
-        player.setPosition(0)
+    player.setVolume(volume)
+    return player
+
+
+def preload_sound_effects(directory: Optional[Path] = None, volume: int = 90) -> None:
+    audio_dir = Path(directory) if directory is not None else _sound_effects_dir
+    if not audio_dir.exists():
+        return
+    for path in sorted(audio_dir.iterdir()):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in {".mp3", ".wav", ".ogg", ".m4a"}:
+            continue
+        _get_or_create_player(path, volume)
+
+
+def play_audio(path: str, volume: int = 90) -> None:
+    global _audio_players
+    audio_path = _resolve_audio_path(path)
+    player = _get_or_create_player(audio_path, volume)
+    player.stop()
+    player.setPosition(0)
     player.play()
 
 

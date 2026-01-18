@@ -1,11 +1,12 @@
 from typing import Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
-
-from poke_for_fun.hamster_dabrain import enter_state
-from poke_for_fun.hamster_states import HamsterState
-from slack_detection import set_sleeping
 from pathlib import Path
+
+from hamster_dabrain import enter_state
+from hamster_states import HamsterState
+from slack_detection import set_sleeping
+from utils import play_audio
 
 
 def wake_up(hamster_widget: QtWidgets.QWidget) -> None:
@@ -19,6 +20,7 @@ def wake_up(hamster_widget: QtWidgets.QWidget) -> None:
     if hasattr(hamster_widget, "sleeping"):
         hamster_widget.sleeping = False
     set_sleeping(False)
+    print("awake")
     ham = getattr(hamster_widget, "ham", None)
     if ham is not None:
         enter_state(ham, HamsterState.IDLE)
@@ -38,6 +40,8 @@ def sleep(
         label.setAlignment(QtCore.Qt.AlignCenter)
         setattr(hamster_widget, "_sleep_label", label)
 
+    play_audio("sound_effects/sleep.mp3")
+
     movie = QtGui.QMovie(str(gif_file))
     label.setMovie(movie)
     label.resize(hamster_widget.size())
@@ -47,4 +51,5 @@ def sleep(
     if hasattr(hamster_widget, "sleeping"):
         hamster_widget.sleeping = True
     set_sleeping(True)
+    print("asleep")
     return movie

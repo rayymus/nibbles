@@ -7,8 +7,9 @@ from slack_detection.detection import (
     detect_active_slacking_window,
 )
 from slack_detection.__init__ import set_sleep_state_getter, is_sleeping
-from annoyed_actions import bite, make_window_smaller, slap_cursor
+from annoyed_actions import bite, make_window_smaller, slap_cursor, splat, reset_splat
 from sleep_state import wake_up, sleep
+from utils import preload_sound_effects
 from CONFIG import *
 
 import os
@@ -62,12 +63,14 @@ class Nibbles(QtWidgets.QWidget):
         # --- input/drag tracking ---
         self.dragging = False
         self.drag_moved = False
+        self.drag_targeted = False
+        self.drag_sprite_active = False
         self.drag_offset = QtCore.QPoint()
         self.press_pos: QtCore.QPoint | None = None
         self.click_move_threshold = 5  # px
         self.poke_on_press = False
         self.long_press_triggered = False
-        self.long_press_duration_ms = 800
+        self.long_press_duration_ms = 500
         self.long_press_timer = QtCore.QTimer(self)
         self.long_press_timer.setSingleShot(True)
         self.long_press_timer.timeout.connect(self._trigger_long_press) 
@@ -112,7 +115,7 @@ class Nibbles(QtWidgets.QWidget):
         scrolling = detect_scrolling(
             self.slack_state,
             min_events=REELS_SCROLLED,
-            min_period_s=0.92,
+            min_period_s=0.62,
             max_period_s=TIME_PER_REEL+TIME_PER_REEL_DEVIATION,
             max_jitter_ratio=1,
         )
@@ -126,31 +129,39 @@ class Nibbles(QtWidgets.QWidget):
             threshold_seconds=SLACKING_THRESHOLD,
         )
         if scrolling or idle or window_slack:
-            # trigger hamster annoyance here
-            # randomise action
-            if scrolling:
-                print("Scrolling")
-                self._slap_cursor_if_ready()
-                # match random.choice(["make_window_smaller", "bite", "slap_cursor"]):
-                #     case "make_window_smaller":
-                #         make_window_smaller(self)
-                #     case "bite":
-                #         bite(self)
-                #     case "slap_cursor":
-                #         self._slap_cursor_if_ready()
+            #  Reset
+            self.slack_state.click_timestamps.clear() 
+            self.slack_state.scroll_timestamps.clear()
+            self.slack_state.last_input_time = 0
+
+            bite(self)
+            # if scrolling: #  Active slacking
+            #     print("Scrolling")
+            #     self._slap_cursor_if_ready()
+            #     # possible_actions = ["make_window_smaller", "bite", "slap_cursor", "splat"]
                 
-            elif idle: 
-                print("Idle")
-                if detect_active_slacking_window(
-                    self.slack_state,
-                    threshold_seconds=0
-                ):
-                    bite(self)
-                else:
-                    ...
-            else:
-                print("window slack")
-                make_window_smaller(self)
+            # elif idle: 
+            #     print("Idle")
+            #     if detect_active_slacking_window(
+            #         self.slack_state,
+            #         threshold_seconds=0
+            #     ):
+            #         possible_actions = ["make_window_smaller", "bite", "splat"]
+            #     else:
+            #         splat(self)
+            # else: #  Active slacking
+            #     print("window slack")
+            #     possible_actions = ["make_window_smaller", "bite", "splat"]
+
+            # match random.choice(possinle_actions):
+            #     case "make_window_smaller":
+            #         make_window_smaller(self)
+            #     case "bite":
+            #         bite(self)
+            #     case "slap_cursor":
+            #         self._slap_cursor_if_ready()
+            #     case "splat":
+            #         splat(self)
 
     def _load_assets(self) -> None:
         def load(name: str) -> QtGui.QPixmap:
@@ -164,6 +175,8 @@ class Nibbles(QtWidgets.QWidget):
         self.pm_angry = load("walk_1.png")
         self.pm_suspicious = load("walk_2.png")
         self.pm_pancake = load("pancake.png")
+        self.pm_splat = load("splat.png")
+        self.pm_bite = load("bite.png")
 
     def _center_hamster(self) -> None:
         self.ham.x = self.width() / 2
@@ -174,10 +187,14 @@ class Nibbles(QtWidgets.QWidget):
             if self.ham.reaction == ReactionType.ANGRY:
                 return self.pm_angry
             return self.pm_suspicious
+        if self.ham.state == HamsterState.SPLAT:
+            return self.pm_splat
+        elif self.ham.state == HamsterState.BITE:
+            return self.pm_bite
         return self.pm_idle
 
     def _current_pixmap_and_squash(self) -> tuple[QtGui.QPixmap, float, float]:
-        if self.dragging:
+        if self.drag_sprite_active:
             return self.pm_drag, 1.0, 1.0
         if self.ham.state == HamsterState.PANCAKE:
             t = self.ham.pancake_t
@@ -208,6 +225,8 @@ class Nibbles(QtWidgets.QWidget):
         dt = now - self.last_frame_time
         self.last_frame_time = now
         update(self.ham, dt, now)
+        if self.drag_sprite_active and not (QtWidgets.QApplication.mouseButtons() & QtCore.Qt.LeftButton):
+            self.drag_sprite_active = False
         clamped = self._clamp_to_screen(self.pos())
         if clamped != self.pos():
             self.move(clamped)
@@ -235,26 +254,21 @@ class Nibbles(QtWidgets.QWidget):
         if event.button() != QtCore.Qt.LeftButton:
             super().mousePressEvent(event)
             return
-        
-        if self._hit_test(event.pos()):
-            handle = self.windowHandle()
-            if handle is not None:
-                try:
-                    started = handle.startSystemMove()
-                except Exception:
-                    started = False
-                if started is not False:  # treat None/True as started
-                    event.accept()
-                    return
-
+        if self._is_splat_active():
+            self.long_press_timer.stop()
+            self.long_press_triggered = False
+            return
+        hit = self._hit_test(event.pos())
         self.press_pos = event.pos()
         self.drag_moved = False
         self.dragging = True
+        self.drag_targeted = hit
+        self.drag_sprite_active = False
         self.poke_on_press = False
         self.long_press_triggered = False
         self.long_press_timer.stop()
         self.drag_offset = event.globalPos() - self.frameGeometry().topLeft()
-        if self._hit_test(event.pos()):
+        if hit:
             self.long_press_timer.start(self.long_press_duration_ms)
         else:
             self.long_press_timer.stop()
@@ -264,27 +278,39 @@ class Nibbles(QtWidgets.QWidget):
         if not (event.buttons() & QtCore.Qt.LeftButton) or not self.dragging:
             super().mouseMoveEvent(event)
             return
+        if self._is_splat_active():
+            return
         if self.press_pos is not None:
             moved = (event.pos() - self.press_pos).manhattanLength()
             if moved > self.click_move_threshold:
                 self.drag_moved = True
                 self.long_press_timer.stop()
-        target_pos = event.globalPos() - self.drag_offset
-        self.move(self._clamp_to_screen(target_pos))
+                if self.drag_targeted and not self.long_press_triggered:
+                    self.drag_sprite_active = True
+                    self.update()
+        if not self.long_press_triggered:
+            target_pos = event.globalPos() - self.drag_offset
+            self.move(self._clamp_to_screen(target_pos))
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
         if event.button() != QtCore.Qt.LeftButton:
             super().mouseReleaseEvent(event)
             return
+        if self._is_splat_active():
+            self.long_press_timer.stop()
+            self.press_pos = None
+            return
         pos = event.pos()
         was_click = not self.drag_moved
         self.dragging = False
+        self.drag_targeted = False
+        self.drag_sprite_active = False
         self.long_press_timer.stop()
         if self.long_press_triggered:
             self.press_pos = None
             return
         
-        if self.is_sleeping(): return
+        if is_sleeping(): return
         if was_click and self._hit_test(pos) and not self.poke_on_press:
             on_poke(self.ham)
         self.press_pos = None
@@ -326,6 +352,8 @@ class Nibbles(QtWidgets.QWidget):
             or not (QtWidgets.QApplication.mouseButtons() & QtCore.Qt.LeftButton)
         ):
             return
+        if self._is_splat_active():
+            return
         if not self._hit_test(self.press_pos):
             return
         self.long_press_triggered = True
@@ -333,8 +361,23 @@ class Nibbles(QtWidgets.QWidget):
             wake_up(self)
         else:
             sleep(self)
+
+    def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
+        if event.button() == QtCore.Qt.LeftButton and self._is_splat_active():
+            reset_splat(self)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _is_splat_active(self) -> bool:
+        return (
+            getattr(self, "_splat_state", None) is not None
+            or self.ham.state == HamsterState.SPLAT
+        )
         
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:
+        if self.sleeping:
+            return
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
 
@@ -410,6 +453,7 @@ def main() -> int:
         QtCore.QCoreApplication.addLibraryPath(plugins_path)
 
     app = QtWidgets.QApplication(sys.argv)
+    preload_sound_effects()
     pet = Nibbles()
     pet.show()
     pet.move_to_bottom_right()

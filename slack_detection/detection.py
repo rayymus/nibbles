@@ -80,7 +80,7 @@ def detect_scrolling(
         min_period_s,
         max_period_s,
         max_jitter_ratio
-    ) and detect_any_slacking_window()
+    ) and detect_active_slacking_window(state, 0)
 
 
 def detect_inactivity(
