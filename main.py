@@ -134,34 +134,33 @@ class Nibbles(QtWidgets.QWidget):
             self.slack_state.scroll_timestamps.clear()
             self.slack_state.last_input_time = 0
 
-            bite(self)
-            # if scrolling: #  Active slacking
-            #     print("Scrolling")
-            #     self._slap_cursor_if_ready()
-            #     # possible_actions = ["make_window_smaller", "bite", "slap_cursor", "splat"]
+            if scrolling: #  Active slacking
+                print("Scrolling")
+                self._slap_cursor_if_ready()
+                # possible_actions = ["make_window_smaller", "bite", "slap_cursor", "splat"]
                 
-            # elif idle: 
-            #     print("Idle")
-            #     if detect_active_slacking_window(
-            #         self.slack_state,
-            #         threshold_seconds=0
-            #     ):
-            #         possible_actions = ["make_window_smaller", "bite", "splat"]
-            #     else:
-            #         splat(self)
-            # else: #  Active slacking
-            #     print("window slack")
-            #     possible_actions = ["make_window_smaller", "bite", "splat"]
+            elif idle: 
+                print("Idle")
+                if detect_active_slacking_window(
+                    self.slack_state,
+                    threshold_seconds=0
+                ):
+                    possible_actions = ["make_window_smaller", "bite", "splat"]
+                else:
+                    splat(self)
+            else: #  Active slacking
+                print("window slack")
+                possible_actions = ["make_window_smaller", "bite", "splat"]
 
-            # match random.choice(possinle_actions):
-            #     case "make_window_smaller":
-            #         make_window_smaller(self)
-            #     case "bite":
-            #         bite(self)
-            #     case "slap_cursor":
-            #         self._slap_cursor_if_ready()
-            #     case "splat":
-            #         splat(self)
+            match random.choice(possible_actions):
+                case "make_window_smaller":
+                    make_window_smaller(self)
+                case "bite":
+                    bite(self)
+                case "slap_cursor":
+                    self._slap_cursor_if_ready()
+                case "splat":
+                    splat(self)
 
     def _load_assets(self) -> None:
         def load(name: str) -> QtGui.QPixmap:
@@ -406,23 +405,6 @@ class Nibbles(QtWidgets.QWidget):
             painter.restore()
         else:
             painter.drawPixmap(target, pm, QtCore.QRectF(pm.rect()))
-
-        # if self.ham.bubble_text:
-        #     painter.setFont(QtGui.QFont("Arial", 11))
-        #     bubble_w = 280
-        #     bubble_h = 50
-        #     bubble = QtCore.QRectF(
-        #         target.left(),
-        #         target.top() - bubble_h - 10,
-        #         bubble_w,
-        #         bubble_h,
-        #     )
-        #     painter.drawRoundedRect(bubble, 12, 12)
-        #     painter.drawText(
-        #         bubble.adjusted(10, 6, -10, -6),
-        #         QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
-        #         self.ham.bubble_text,
-        #     )
 
     def move_to_bottom_right(self) -> None:
         # Use the screen under the mouse, fallback to primary
