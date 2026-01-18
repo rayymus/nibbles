@@ -7,7 +7,8 @@ from slack_detection.detection import (
     detect_active_slacking_window,
 )
 from slack_detection.__init__ import set_sleep_state_getter, is_sleeping
-from annoyed_actions import bite, make_window_smaller, sleep, slap_cursor, wake_up
+from annoyed_actions import bite, make_window_smaller, slap_cursor
+from sleep_state import wake_up, sleep
 from CONFIG import *
 
 import os
@@ -23,9 +24,9 @@ POKE_DIR = Path(__file__).parent / "poke_for_fun"
 if str(POKE_DIR) not in sys.path:
     sys.path.insert(0, str(POKE_DIR))
 
-from poke_for_fun.hamster_states import HamsterState, ReactionType
-from poke_for_fun.hamster_model import HamsterModel
-from poke_for_fun.hamster_dabrain import on_poke, update
+from hamster_states import HamsterState, ReactionType
+from hamster_model import HamsterModel
+from hamster_dabrain import on_poke, update
 
 
 class Nibbles(QtWidgets.QWidget):
@@ -234,6 +235,18 @@ class Nibbles(QtWidgets.QWidget):
         if event.button() != QtCore.Qt.LeftButton:
             super().mousePressEvent(event)
             return
+        
+        if self._hit_test(event.pos()):
+            handle = self.windowHandle()
+            if handle is not None:
+                try:
+                    started = handle.startSystemMove()
+                except Exception:
+                    started = False
+                if started is not False:  # treat None/True as started
+                    event.accept()
+                    return
+
         self.press_pos = event.pos()
         self.drag_moved = False
         self.dragging = True
@@ -270,6 +283,8 @@ class Nibbles(QtWidgets.QWidget):
         if self.long_press_triggered:
             self.press_pos = None
             return
+        
+        if self.is_sleeping(): return
         if was_click and self._hit_test(pos) and not self.poke_on_press:
             on_poke(self.ham)
         self.press_pos = None

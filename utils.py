@@ -169,3 +169,16 @@ def _parse_xprop_value(output: Optional[str], prefer_last: bool = False) -> Opti
         return matches[-1] if prefer_last else matches[0]
     cleaned = value.strip().strip('"')
     return cleaned or None
+
+
+def _macos_accessibility_trusted() -> bool:
+    if platform.system().lower() != "darwin":
+        return True
+    try:
+        import Quartz  # type: ignore
+    except Exception:
+        return True
+    try:
+        return bool(Quartz.AXIsProcessTrusted())
+    except Exception:
+        return True

@@ -7,16 +7,13 @@ import time
 import math
 import random
 import subprocess
-from pathlib import Path
 from typing import Optional, Sequence, Tuple, Union
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from poke_for_fun.hamster_dabrain import enter_state
-from poke_for_fun.hamster_states import HamsterState
-from slack_detection import get_active_window_info, set_sleeping
 from CONFIG import *
-from utils import play_audio
+from slack_detection import get_active_window_info
+from utils import play_audio, _parse_xprop_value, _run_command, _macos_accessibility_trusted
 
 
 SizeLike = Union[QtCore.QSize, Tuple[int, int]]
@@ -35,6 +32,16 @@ class BiteSession:
     overlay: "BiteOverlay"
     timer: QtCore.QTimer
     window_id: str
+
+
+@dataclass
+class SplatState:
+    prev_geometry: QtCore.QRect
+    prev_min_size: QtCore.QSize
+    prev_max_size: QtCore.QSize
+    prev_scale: float
+    prev_ham_pos: Tuple[float, float]
+    event_filter: QtCore.QObject
 
 
 class BiteOverlay(QtWidgets.QWidget):
@@ -67,6 +74,20 @@ class BiteOverlay(QtWidgets.QWidget):
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
         path = _build_bite_path(self._bite_rect)
         painter.fillPath(path, self._bite_color)
+
+
+class _SplatResetFilter(QtCore.QObject):
+    def __init__(self, hamster_widget: QtWidgets.QWidget) -> None:
+        super().__init__(hamster_widget)
+        self._hamster_widget = hamster_widget
+
+    def eventFilter(self, _obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if event.type() == QtCore.QEvent.MouseButtonDblClick:
+            if isinstance(event, QtGui.QMouseEvent) and event.button() != QtCore.Qt.LeftButton:
+                return False
+            _reset_splat(self._hamster_widget)
+            return True
+        return False
 
 
 def bite( #  Should only be run if active window is slacking window
@@ -216,6 +237,95 @@ def make_window_smaller( #  Can only be used if active window is slacking.
     timer.start()
     return timer
 
+
+def splat(hamster_widget: QtWidgets.QWidget) -> Optional[SplatState]:
+    """Enlarge the hamster to cover the screen until the user double clicks."""
+    existing = getattr(hamster_widget, "_splat_state", None)
+    if existing is not None:
+        return existing
+
+    ham = getattr(hamster_widget, "ham", None)
+    if ham is None or not hasattr(ham, "user_scale"):
+        print("splat: hamster widget missing model")
+        return None
+
+    get_pm = getattr(hamster_widget, "_current_pixmap_and_squash", None)
+    if callable(get_pm):
+        pm, sx, sy = get_pm()
+    else:
+        pm = getattr(hamster_widget, "pm_idle", None)
+        sx, sy = 1.0, 1.0
+    if pm is None or pm.isNull():
+        print("splat: missing pixmap")
+        return None
+
+    center = hamster_widget.frameGeometry().center()
+    screen = QtGui.QGuiApplication.screenAt(center) or QtGui.QGuiApplication.primaryScreen()
+    if screen is None:
+        print("splat: no screen available")
+        return None
+
+    prev_geometry = hamster_widget.geometry()
+    prev_min_size = hamster_widget.minimumSize()
+    prev_max_size = hamster_widget.maximumSize()
+    prev_scale = float(ham.user_scale)
+    prev_ham_pos = (float(ham.x), float(ham.y))
+
+    reset_filter = _SplatResetFilter(hamster_widget)
+    hamster_widget.installEventFilter(reset_filter)
+    state = SplatState(
+        prev_geometry=prev_geometry,
+        prev_min_size=prev_min_size,
+        prev_max_size=prev_max_size,
+        prev_scale=prev_scale,
+        prev_ham_pos=prev_ham_pos,
+        event_filter=reset_filter,
+    )
+    setattr(hamster_widget, "_splat_state", state)
+
+    screen_rect = screen.geometry()
+    screen_size = screen_rect.size()
+    hamster_widget.setMinimumSize(screen_size)
+    hamster_widget.setMaximumSize(screen_size)
+    hamster_widget.resize(screen_size)
+    hamster_widget.move(screen_rect.topLeft())
+
+    base_w = max(1, pm.width())
+    base_h = max(1, pm.height())
+    sx = max(0.01, float(sx))
+    sy = max(0.01, float(sy))
+    target_scale = max(
+        screen_size.width() / (base_w * sx),
+        screen_size.height() / (base_h * sy),
+    )
+    ham.user_scale = target_scale * 1.02
+    ham.x = screen_size.width() / 2
+    ham.y = screen_size.height() / 2
+    hamster_widget.raise_()
+    hamster_widget.update()
+    return state
+
+
+def _reset_splat(hamster_widget: QtWidgets.QWidget) -> None:
+    state = getattr(hamster_widget, "_splat_state", None)
+    if state is None:
+        return
+
+    hamster_widget.removeEventFilter(state.event_filter)
+    state.event_filter.deleteLater()
+
+    hamster_widget.setMinimumSize(state.prev_min_size)
+    hamster_widget.setMaximumSize(state.prev_max_size)
+    hamster_widget.setGeometry(state.prev_geometry)
+
+    ham = getattr(hamster_widget, "ham", None)
+    if ham is not None:
+        ham.user_scale = state.prev_scale
+        ham.x, ham.y = state.prev_ham_pos
+
+    setattr(hamster_widget, "_splat_state", None)
+    hamster_widget.update()
+
 def slap_cursor(
     hamster_widget: QtWidgets.QWidget,
     moves: int = 6,
@@ -277,47 +387,6 @@ def drag(
     timer.timeout.connect(tick)
     timer.start()
     return timer
-
-def wake_up(hamster_widget: QtWidgets.QWidget) -> None:
-    """Stop the sleep animation and return the hamster to idle."""
-    label = getattr(hamster_widget, "_sleep_label", None)
-    if label is not None:
-        movie = label.movie()
-        if movie is not None:
-            movie.stop()
-        label.hide()
-    if hasattr(hamster_widget, "sleeping"):
-        hamster_widget.sleeping = False
-    set_sleeping(False)
-    ham = getattr(hamster_widget, "ham", None)
-    if ham is not None:
-        enter_state(ham, HamsterState.IDLE)
-    hamster_widget.update()
-    
-def sleep(
-    hamster_widget: QtWidgets.QWidget,
-    gif_path: Optional[str] = None,
-) -> QtGui.QMovie:
-    gif_file = Path(gif_path) if gif_path else Path(__file__).parent / "sprites" / "sleepy.gif"
-
-    label = getattr(hamster_widget, "_sleep_label", None)
-    if label is None:
-        label = QtWidgets.QLabel(hamster_widget)
-        label.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
-        label.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
-        label.setAlignment(QtCore.Qt.AlignCenter)
-        setattr(hamster_widget, "_sleep_label", label)
-
-    movie = QtGui.QMovie(str(gif_file))
-    label.setMovie(movie)
-    label.resize(hamster_widget.size())
-    label.show()
-    movie.start()
-
-    if hasattr(hamster_widget, "sleeping"):
-        hamster_widget.sleeping = True
-    set_sleeping(True)
-    return movie
 
 
 def _to_size(value: SizeLike) -> QtCore.QSize:
@@ -799,42 +868,3 @@ def _run_command_with_status(args: Sequence[str]) -> Optional[tuple[str, str, in
     except FileNotFoundError:
         return None
     return result.stdout.strip(), result.stderr.strip(), result.returncode
-
-
-def _macos_accessibility_trusted() -> bool:
-    if platform.system().lower() != "darwin":
-        return True
-    try:
-        import Quartz  # type: ignore
-    except Exception:
-        return True
-    try:
-        return bool(Quartz.AXIsProcessTrusted())
-    except Exception:
-        return True
-
-
-def _run_command(args: Sequence[str]) -> Optional[str]:
-    try:
-        result = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except FileNotFoundError:
-        return None
-    if result.returncode != 0:
-        return None
-    return result.stdout.strip()
-
-
-def _parse_xprop_value(output: Optional[str], prefer_last: bool = False) -> Optional[str]:
-    if not output or "=" not in output:
-        return None
-    _, value = output.split("=", 1)
-    matches = re.findall(r'"([^"]+)"', value)
-    if matches:
-        return matches[-1] if prefer_last else matches[0]
-    cleaned = value.strip().strip('"')
-    return cleaned or None
