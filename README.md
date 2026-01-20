@@ -1,5 +1,5 @@
 # nibbles
-Desktop hamster
+![Nibbles the Desktop Hamster](sprites/idle.png)
 
 Detects if you have been slacking: scrolling social media, playing roblox, or idling
 Algorithm:
@@ -8,7 +8,7 @@ Algorithm:
 - And the user's active window is a "slacking window"
 
 Hamster actions to get you to lock in:
-- Drag mouse away when you're slacking
+- Drag mouse away when you're slacking (not currently added)
 - Slap mouse away when you're slacking
 - Makes the window size smaller when you're slacking
 - BITES the video playing when you're slacking
@@ -35,6 +35,14 @@ In the future, we hope to enable more customisations for users, e.g. customising
 
 
 
-## Debug
+## Technical
+### Debug
 If there's a PyQt5 error, try reinstalling with
 `python -m pip install --upgrade --force-reinstall PyQt5 PyQt5-sip`
+### Algorithm
+Scrolling - Periodic mouse clicks / scrolls and active window is slacking window
+- Slap, Make window smaller, bite, or splat
+Daydreaming - Lack of user input for extended period of time
+- Splat unless actively on slacking window
+Actively slacking - On a blacklisted window for too long
+- Make window smaller, bite, or splat
